@@ -1,0 +1,517 @@
+require(data.table)
+library(ggplot2)
+library(Matrix)
+library(caret)
+library(dplyr)
+require(hrbrthemes)
+require(pals)
+require(viridis)
+require(gramEvol)
+require(reticulate)
+require(Rcpp)
+
+source('meta_features_functions.R')
+
+use_python("C:/Program Files/Spyder/Python")
+use_virtualenv("C:/Program Files/Spyder/Python/Scripts/envs")
+pd <- import('pandas')
+np <- import('numpy')
+mdcgen <- import('mdcgenpy.clusters')
+
+## Matilda results
+
+bounds_prunned <- fread('bounds_prunned.csv')
+feature_raw <- fread('feature_raw.csv')
+feature_process <- fread('feature_process.csv')
+coordinates <- fread('coordinates.csv')
+projection <- fread('projection_matrix.csv')
+instance_space <- fread('instance_space.csv')
+
+## Training interpolation and prediction models (k-NN) 
+
+fitControl <- trainControl(             
+  method = "repeatedcv", ## 10-fold CV 
+  number = 10,
+  repeats = 10)
+
+set.seed(1)
+features.mf1 <- data.frame(feature_process$ratio_ftr_ex, feature_raw$ratio_ftr_ex)
+colnames(features.mf1) <- c('V1', 'V2')
+mf1.train = train(V1 ~ V2, data = features.mf1,  
+                  method = "knn", trControl = fitControl, tuneLength = 10)
+
+set.seed(1)
+features.mf2 <- data.frame(feature_process$avg_pca, feature_raw$avg_pca)
+colnames(features.mf2) <- c('V1', 'V2')
+mf2.train = train(V1 ~ V2, data = features.mf2,  
+                  method = "knn", trControl = fitControl, tuneLength = 10)
+
+set.seed(1)
+features.mf3 <- data.frame(feature_process$avg_abs_cor, feature_raw$avg_abs_cor)
+colnames(features.mf3) <- c('V1', 'V2')
+mf3.train = train(V1 ~ V2, data = features.mf3,  
+                  method = "knn", trControl = fitControl, tuneLength = 10)
+
+set.seed(1)
+features.mf4 <- data.frame(feature_process$avg_nnd, feature_raw$avg_nnd)
+colnames(features.mf4) <- c('V1', 'V2')
+mf4.train = train(V1 ~ V2, data = features.mf4,  
+                  method = "knn", trControl = fitControl, tuneLength = 10)
+
+set.seed(1)
+features.mf5 <- data.frame(feature_process$sd_dist, feature_raw$sd_dist)
+colnames(features.mf5) <- c('V1', 'V2')
+mf5.train = train(V1 ~ V2, data = features.mf5,  
+                  method = "knn", trControl = fitControl, tuneLength = 10)
+
+set.seed(1)
+features.mf6 <- data.frame(feature_process$cop_entropy, feature_raw$cop_entropy)
+colnames(features.mf6) <- c('V1', 'V2')
+mf6.train = train(V1 ~ V2, data = features.mf6,  
+                  method = "knn", trControl = fitControl, tuneLength = 10)
+
+set.seed(1)
+examples <- data.frame(as.numeric(instance_space$examples), instance_space$z_1, instance_space$z_2)
+colnames(examples) <- c('V1', 'V2', 'V3')
+examples.train = train(V1 ~ V2 + V3, data = examples,
+                       method = "knn", trControl = fitControl, tuneLength = 10)
+
+set.seed(1)
+attributes <- data.frame(as.numeric(instance_space$attributes), instance_space$z_1, instance_space$z_2)
+colnames(attributes) <- c('V1', 'V2', 'V3')
+attributes.train = train(V1 ~ V2 + V3, data = attributes,
+                         method = "knn", trControl = fitControl, tuneLength = 10)
+
+set.seed(1)
+clusters <- data.frame(as.numeric(instance_space$clusters), instance_space$z_1, instance_space$z_2)
+colnames(clusters) <- c('V1', 'V2', 'V3')
+clusters.train = train(V1 ~ V2 + V3, data = clusters,
+                       method = "knn", trControl = fitControl, tuneLength = 10)
+
+
+## Integer Genetic Algorithm 
+
+# Objective Function
+
+distance <- function(x){
+  # MDCGen generator
+  if(x[3] <= x[1]){
+    d = list('gaussian', 'normal', 'triangular', 'gap', 'logistic', 'uniform', 'gamma')
+    cluster_gen <- mdcgen$ClusterGenerator(n_samples = as.integer(x[1]), 
+                                           n_feats = as.integer(x[2]), 
+                                           k = as.integer(x[3]),
+                                           distributions = d[[as.integer(x[4])]],
+                                           corr = as.numeric(x[5]/10),
+                                           compactness_factor = as.numeric(x[6]/10),
+                                           alpha_n = as.numeric(x[7]),
+                                           outliers = as.integer(0),
+                                           add_noise = as.integer(0))
+    data <- cluster_gen$generate_data()
+    df <- pd$DataFrame(np$column_stack(data))
+    # meta-features
+    df1 <- ratio_ftr_ex(df)
+    df2 <- avg_pca(df)
+    df3 <- avg_abs_cor(df)
+    df4 <- avg_nnd(df)
+    df5 <- sd_dist(df)
+    df6 <- cop_entropy(df)
+    # interpolation
+    df1 <- as.data.frame(df1)
+    colnames(df1) <- 'V2'
+    mf1 <- as.numeric(predict(mf1.train, df1))
+    df2 <- as.data.frame(df2)
+    colnames(df2) <- 'V2'
+    mf2 <- as.numeric(predict(mf2.train, df2))
+    df3 <- as.data.frame(df3)
+    colnames(df3) <- 'V2'
+    mf3 <- as.numeric(predict(mf3.train, df3))
+    df4 <- as.data.frame(df4)
+    colnames(df4) <- 'V2'
+    mf4 <- as.numeric(predict(mf4.train, df4))
+    df5 <- as.data.frame(df5)
+    colnames(df5) <- 'V2'
+    mf5 <- as.numeric(predict(mf5.train, df5))
+    df6 <- as.data.frame(df6)
+    colnames(df6) <- 'V2'
+    mf6 <- as.numeric(predict(mf6.train, df6))
+    # new coordinates
+    z1 <- mf1*as.numeric(projection[1, 2]) + mf2*as.numeric(projection[1, 3]) +
+      mf3*as.numeric(projection[1, 4]) + mf4*as.numeric(projection[1, 5]) + 
+      mf5*as.numeric(projection[1, 6]) + mf6*as.numeric(projection[1, 7])  
+    z2 <- mf1*as.numeric(projection[2, 2]) + mf2*as.numeric(projection[2, 3]) +
+      mf3*as.numeric(projection[2, 4]) + mf4*as.numeric(projection[2, 5]) + 
+      mf5*as.numeric(projection[2, 6]) + mf6*as.numeric(projection[2, 7])  
+    # output
+    return((abs(z1 - target[1]) + abs(z2 - target[2])))
+  } else{
+    return(1000)
+  }
+}
+
+# New point
+
+target <- as.matrix(c(0.905458057, 0.97125179)) # iris
+
+
+teste.ex <- data.frame(t(target)) 
+colnames(teste.ex) <- c('V2', 'V3')
+new.ex <- as.numeric(predict(examples.train, teste.ex))
+
+teste.att <- data.frame(t(target)) 
+colnames(teste.att) <- c('V2', 'V3')
+new.att <- as.numeric(predict(attributes.train, teste.att))  
+
+teste.k <- data.frame(t(target)) 
+colnames(teste.k) <- c('V2', 'V3')
+new.k <- as.numeric(predict(clusters.train, teste.k)) 
+
+start <- t(as.matrix(c(round(new.ex), round(new.att), round(new.k), 1, 5, 5, 5)))
+
+if(round(new.ex) <= 1000){
+  low.ex <- 2
+  up.ex <- 2000
+} else if(round(new.ex) >= 4000){
+  low.ex <- 3000
+  up.ex <- 5000
+} else{
+  low.ex <- round(new.ex) - 1000
+  up.ex <- round(new.ex) + 1000
+}
+
+if(round(new.att) <= 20){
+  low.att <- 2
+  up.att <- 40
+} else if(round(new.att) >= 80){
+  low.att <- 60
+  up.att <- 100
+} else{
+  low.att <- round(new.att) - 20
+  up.att <- round(new.att) + 20
+}
+
+if(round(new.k) <= 10){
+  low.k <- 2
+  up.k <- 20
+} else if(round(new.k) >= 30){
+  low.k <- 20
+  up.k <- 40
+} else{
+  low.k <- round(new.k) - 10
+  up.k <- round(new.k) + 10
+}
+
+lower <- c(low.ex, low.att, low.k, 1, 1, 1, 1)
+upper <- c(up.ex, up.att, up.k, 7, 10, 10, 10)
+
+monitorFunc <- function(result) {
+  cat(result$population$currentIteration, 
+      "Mean distance:", result$population$mean[result$population$currentIteration],
+      "Lowest distance:", result$best$cost, 
+      "Best settings:", result$best$genome, "\n")
+}
+
+out.ga.int <- GeneticAlg.int(genomeLen = 7, 
+                             codonMin = 1, codonMax = 5000,
+                             genomeMin = lower, genomeMax = upper,
+                             suggestions = start,
+                             popSize = 10, iterations = 500, terminationCost = 0.05,
+                             monitorFunc = monitorFunc, evalFunc = distance,
+                             allowrepeat = TRUE)
+
+## Plotting the new dataset in instance space
+
+d = list('gaussian', 'normal', 'triangular', 'gap', 'logistic', 'uniform', 'gamma')
+
+cluster_gen <- mdcgen$ClusterGenerator(n_samples = as.integer(out.ga.int$best$genome[1]), 
+                                       n_feats = as.integer(out.ga.int$best$genome[2]), 
+                                       k = as.integer(out.ga.int$best$genome[3]),
+                                       distributions = d[[out.ga.int$best$genome[4]]],
+                                       corr = as.numeric(out.ga.int$best$genome[5]/10),
+                                       compactness_factor = as.numeric(out.ga.int$best$genome[6]/10),
+                                       alpha_n = as.numeric(out.ga.int$best$genome[7]),
+                                       outliers = as.integer(0),
+                                       add_noise = as.integer(0))
+
+data <- cluster_gen$generate_data()
+df <- pd$DataFrame(np$column_stack(data))
+
+# meta-features
+
+df1 <- ratio_ftr_ex(df)
+df2 <- avg_pca(df)
+df3 <- avg_abs_cor(df)
+df4 <- avg_nnd(df)
+df5 <- sd_dist(df)
+df6 <- cop_entropy(df)
+
+# predicting pre-processed features
+
+df1 <- as.data.frame(df1)
+colnames(df1) <- 'V2'
+mf1 <- as.numeric(predict(mf1.train, df1))
+
+df2 <- as.data.frame(df2)
+colnames(df2) <- 'V2'
+mf2 <- as.numeric(predict(mf2.train, df2))
+
+df3 <- as.data.frame(df3)
+colnames(df3) <- 'V2'
+mf3 <- as.numeric(predict(mf3.train, df3))
+
+df4 <- as.data.frame(df4)
+colnames(df4) <- 'V2'
+mf4 <- as.numeric(predict(mf4.train, df4))
+
+df5 <- as.data.frame(df5)
+colnames(df5) <- 'V2'
+mf5 <- as.numeric(predict(mf5.train, df5))
+
+df6 <- as.data.frame(df6)
+colnames(df6) <- 'V2'
+mf6 <- as.numeric(predict(mf6.train, df6))
+
+# projection matrix
+
+z1 <- mf1*as.numeric(projection[1, 2]) + mf2*as.numeric(projection[1, 3]) +
+  mf3*as.numeric(projection[1, 4]) + mf4*as.numeric(projection[1, 5]) + 
+  mf5*as.numeric(projection[1, 6]) + mf6*as.numeric(projection[1, 7])
+
+z2 <- mf1*as.numeric(projection[2, 2]) + mf2*as.numeric(projection[2, 3]) +
+  mf3*as.numeric(projection[2, 4]) + mf4*as.numeric(projection[2, 5]) + 
+  mf5*as.numeric(projection[2, 6]) + mf6*as.numeric(projection[2, 7]) 
+
+# instance space
+
+is <- instance_space[, 1:4]
+new <- data.frame('df', z1, z2, 'New dataset')
+colnames(new) <- c('Row', 'z_1', 'z_2', 'dataset')
+is <- rbind(is, new)
+
+ggplot() + 
+  geom_point(data = is, aes(x = z_1, y = z_2, color = dataset)) + 
+  geom_path(data = bounds_prunned, aes(x = z_1, y = z_2), alpha = 0.5) +
+  xlim(-4, 4) +
+  ylim(-4, 5) +
+  labs(title = "Instance Space") +
+  scale_size(range = c(1, 10)) + 
+  xlab(expression(Z[1])) +
+  ylab(expression(Z[2])) +
+  scale_color_manual(values = as.vector(parula(5))) +
+  theme(
+    axis.text.x  = element_text(hjust = 0, size = 10),
+    axis.text.y  = element_text(hjust = 0, size = 10),
+    plot.title = element_text(hjust = 0.5),
+    panel.border = element_blank(),  
+    panel.grid.major = element_line(colour = "azure3"),
+    panel.grid.minor = element_line(colour = "azure3"),
+    panel.background = element_blank(),
+    axis.line = element_line(colour = "black"),
+    legend.background = element_rect(colour = "black"),
+    legend.box.background = element_rect(colour = "black"),
+    legend.key = element_rect(colour = "white", fill = NA),
+    legend.text = element_text(size = 12),
+    legend.title = element_blank(),
+    title = element_text(size = 12))
+
+## performance new datasets
+
+require(aricode)
+require(Spectrum) 
+
+iris <- fread("iris1.csv")
+
+# 3) single linkage
+res <- hclust(dist(df[, 0:15]), 'single')
+clusters <- as.matrix(cutree(res, n_distinct(df[, 16])))
+ARI(as.vector(clusters), as.vector(t(df[, 16])))
+
+res <- hclust(dist(iris[, 1:4]), 'single')
+clusters <- as.matrix(cutree(res, n_distinct(iris[, 5])))
+ARI(as.vector(clusters), as.vector(t(iris[, 5])))
+
+# 7) spectral clustering
+ds <- t(df[, 0:15])
+colnames(ds) <- c(1:dim(df)[1])
+res <- Spectrum(ds, method = 3, diffusion = FALSE, clusteralg = 'km', 
+                fixk = n_distinct(df[, 16]))
+clusters <- res$assignments
+ARI(as.vector(clusters), as.vector(t(df[, 16])))
+
+## plotting 8 points
+
+a <- fread("A.csv")
+b <- fread("B.csv")
+c <- fread("C.csv")
+d <- fread("D.csv")
+e <- fread("E.csv")
+f <- fread("F.csv")
+g <- fread("G.csv")
+h <- fread("H.csv")
+
+resultados_generation <- fread("resultados_generation.csv", dec = ",")
+str(resultados_generation)
+target <- fread("target.csv", dec = ",")
+
+require(aricode)
+require(Spectrum) 
+
+# 3) single linkage
+res <- hclust(dist(h[, 1:40]), 'single')
+clusters <- as.matrix(cutree(res, n_distinct(h[, 41])))
+ARI(as.vector(clusters), as.vector(t(h[, 41])))
+
+
+# 7) spectral clustering
+df <- h[, 1:40]
+ds <- t(df)
+colnames(ds) <- c(1:dim(df)[1])
+res <- Spectrum(ds, method = 3, diffusion = FALSE, clusteralg = 'km', 
+                  fixk = n_distinct(h[, 41]))
+clusters <- res$assignments
+ARI(as.vector(clusters), as.vector(t(h[, 41])))
+
+
+data <- rbind(instance_space[, 2:4], resultados_generation[, 12:14], target[, 2:4])
+data$dataset[data$dataset == "Real datasets"] <- "OpenML datasets"
+
+
+ggplot() + 
+  geom_point(data = data, aes(x = z_1, y = z_2, color = dataset, shape = dataset)) + 
+  scale_shape_manual(values = c(rep(16, 5), 4)) +
+  #geom_segment(aes(x = 0, y = 0, xend = 1.5, yend = 2), linetype = "dotted") +
+  #geom_segment(aes(x = 0, y = 0, xend = -2, yend = 1.25), linetype = "dotted") +
+  #geom_segment(aes(x = 0, y = 0, xend = -2, yend = -1.25), linetype = "dotted") +
+  #geom_segment(aes(x = 0, y = 0, xend = 2, yend = -2.5), linetype = "dotted") +
+  #geom_segment(aes(x = 0, y = 0, xend = 0, yend = 1.25), linetype = "dotted") +
+  #geom_segment(aes(x = 0, y = 0, xend = -1, yend = 1.25), linetype = "dotted") +
+  #geom_segment(aes(x = 0, y = 0, xend = -1, yend = 2.5), linetype = "dotted") +
+  xlim(-3, 3) +
+  ylim(-3, 4) +
+  labs(title = "Instance Space") +
+  scale_size(range = c(1, 10)) + 
+  xlab(expression(Z[1])) +
+  ylab(expression(Z[2])) +
+  scale_color_manual(values = as.vector(c("#003399",
+                                          "#0099FF",
+                                          "#00CC99",
+                                          "#FF3300",
+                                          "#FFFF00",
+                                          "#000000"))) +
+  theme(
+    axis.text.x  = element_text(hjust = 0, size = 10),
+    axis.text.y  = element_text(hjust = 0, size = 10),
+    plot.title = element_text(hjust = 0.5),
+    panel.border = element_blank(),  
+    #panel.grid.major = element_line(colour = "azure3"),
+    #panel.grid.minor = element_line(colour = "azure3"),
+    panel.background = element_blank(),
+    axis.line = element_line(colour = "black"),
+    legend.background = element_rect(colour = "black"),
+    legend.box.background = element_rect(colour = "black"),
+    legend.key = element_rect(colour = "white", fill = NA),
+    legend.text = element_text(size = 12),
+    legend.title = element_blank(),
+    title = element_text(size = 12)) +
+  annotate(geom = "text", x = 0.25, y = 0, label = "T1", color = "black") +
+  annotate(geom = "text", x = 1.75, y = 2, label = "T2", color = "black") +
+  annotate(geom = "text", x = -2.25, y = 1.25, label = "T3", color = "black") +
+  annotate(geom = "text", x = -2.25, y = -1.25, label = "T4", color = "black") +
+  annotate(geom = "text", x = 2, y = -2.75, label = "T5", color = "black") +
+  annotate(geom = "text", x = 0.25, y = 1.25, label = "T6", color = "black") +
+  annotate(geom = "text", x = -0.75, y = 1.25, label = "T7", color = "black") +
+  annotate(geom = "text", x = -1.25, y = 2.5, label = "T8", color = "black") 
+  
+
+ggplot() + 
+  geom_point(data = instance_space, aes(x = z_1, y = z_2, color = examples)) + 
+  #geom_path(data = bounds_prunned, aes(x = z_1, y = z_2), alpha = 0.5) +
+  xlim(-4, 4) +
+  ylim(-4, 5) +
+  labs(title = "# Examples") +
+  scale_size(range = c(1, 10)) + 
+  xlab(expression(Z[1])) +
+  ylab(expression(Z[2])) +
+  scale_color_gradientn(trans = "log10", colors = as.vector(parula(20))) +
+  theme(
+    axis.text.x  = element_text(hjust = 0, size = 10),
+    axis.text.y  = element_text(hjust = 0, size = 10),
+    plot.title = element_text(hjust = 0.5),
+    panel.border = element_blank(),  
+    #panel.grid.major = element_line(colour = "azure3"),
+    #panel.grid.minor = element_line(colour = "azure3"),
+    panel.background = element_blank(),
+    axis.line = element_line(colour = "black"),
+    legend.background = element_rect(colour = "black"),
+    legend.box.background = element_rect(colour = "black"),
+    legend.key = element_rect(colour = "white", fill = NA),
+    legend.text = element_text(size = 12),
+    legend.title = element_blank(),
+    title = element_text(size = 12))
+
+
+ggplot() + 
+  geom_point(data = instance_space, aes(x = z_1, y = z_2, color = attributes)) + 
+  #geom_path(data = bounds_prunned, aes(x = z_1, y = z_2), alpha = 0.5) +
+  xlim(-4, 4) +
+  ylim(-4, 5) +
+  labs(title = "# Attributes") +
+  scale_size(range = c(1, 10)) + 
+  xlab(expression(Z[1])) +
+  ylab(expression(Z[2])) +
+  scale_color_gradientn(trans = "log10", colors = as.vector(parula(20))) +
+  theme(
+    axis.text.x  = element_text(hjust = 0, size = 10),
+    axis.text.y  = element_text(hjust = 0, size = 10),
+    plot.title = element_text(hjust = 0.5),
+    panel.border = element_blank(),  
+    #panel.grid.major = element_line(colour = "azure3"),
+    #panel.grid.minor = element_line(colour = "azure3"),
+    panel.background = element_blank(),
+    axis.line = element_line(colour = "black"),
+    legend.background = element_rect(colour = "black"),
+    legend.box.background = element_rect(colour = "black"),
+    legend.key = element_rect(colour = "white", fill = NA),
+    legend.text = element_text(size = 12),
+    legend.title = element_blank(),
+    title = element_text(size = 12))
+
+
+ggplot() + 
+  geom_point(data = instance_space, aes(x = z_1, y = z_2, color = clusters)) + 
+  #geom_path(data = bounds_prunned, aes(x = z_1, y = z_2), alpha = 0.5) +
+  xlim(-4, 4) +
+  ylim(-4, 5) +
+  labs(title = "# Clusters") +
+  scale_size(range = c(1, 10)) + 
+  xlab(expression(Z[1])) +
+  ylab(expression(Z[2])) +
+  scale_color_gradientn(trans = "log10", colors = as.vector(parula(20))) +
+  theme(
+    axis.text.x  = element_text(hjust = 0, size = 10),
+    axis.text.y  = element_text(hjust = 0, size = 10),
+    plot.title = element_text(hjust = 0.5),
+    panel.border = element_blank(),  
+    #panel.grid.major = element_line(colour = "azure3"),
+    #panel.grid.minor = element_line(colour = "azure3"),
+    panel.background = element_blank(),
+    axis.line = element_line(colour = "black"),
+    legend.background = element_rect(colour = "black"),
+    legend.box.background = element_rect(colour = "black"),
+    legend.key = element_rect(colour = "white", fill = NA),
+    legend.text = element_text(size = 12),
+    legend.title = element_blank(),
+    title = element_text(size = 12))
+
+real <- instance_space[337:553, ]
+summary(real)
+artificial <- instance_space[1:336, ]
+summary(artificial)
+
+
+
+
+
+
+
+
+
